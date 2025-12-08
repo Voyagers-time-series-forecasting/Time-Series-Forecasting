@@ -429,7 +429,10 @@ class Chronos2Dataset(IterableDataset):
         self.context_length = context_length
         self.prediction_length = prediction_length
         self.batch_size = batch_size
-        self.num_output_patches = math.ceil(prediction_length / output_patch_size)
+        self.output_patch_size = output_patch_size
+        # In TRAIN mode, we will sample num_output_patches randomly up to this value
+        # In VALIDATION/TEST mode, we use this fixed value
+        self.max_output_patches = math.ceil(prediction_length / output_patch_size)
         self.min_past = min_past
         self.mode = mode
 
@@ -556,14 +559,30 @@ class Chronos2Dataset(IterableDataset):
             target_idx_ranges.append((target_start_idx, target_start_idx + task_n_targets))
             target_start_idx += group_size
 
+        # Randomly sample number of output patches during training
+        if self.mode == DatasetMode.TRAIN:
+            num_output_patches = np.random.randint(1, self.max_output_patches + 1)
+        else:
+            num_output_patches = self.max_output_patches
+            
+        horizon = num_output_patches * self.output_patch_size
+
+        future_target = None
+        if self.mode != DatasetMode.TEST:
+            future_target = torch.cat(cast(list[torch.Tensor], batch_future_target_tensor_list), dim=0)
+            if future_target.shape[-1] > horizon:
+                future_target = future_target[..., :horizon]
+
+        future_covariates = torch.cat(batch_future_covariates_tensor_list, dim=0)
+        if future_covariates.shape[-1] > horizon:
+            future_covariates = future_covariates[..., :horizon]
+
         return {
             "context": left_pad_and_cat_2D(batch_context_tensor_list),
-            "future_target": None
-            if self.mode == DatasetMode.TEST
-            else torch.cat(cast(list[torch.Tensor], batch_future_target_tensor_list), dim=0),
-            "future_covariates": torch.cat(batch_future_covariates_tensor_list, dim=0),
+            "future_target": future_target,
+            "future_covariates": future_covariates,
             "group_ids": torch.cat(batch_group_ids_list, dim=0),
-            "num_output_patches": self.num_output_patches,
+            "num_output_patches": num_output_patches,
             "target_idx_ranges": target_idx_ranges,
         }
 
