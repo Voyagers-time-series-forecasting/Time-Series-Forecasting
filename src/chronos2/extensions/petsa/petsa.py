@@ -283,7 +283,8 @@ class ChronosPETSAPipeline(Chronos2Pipeline):
             
             # Extend results (move back to CPU to save GPU memory)
             # Cast to float32 to avoid numpy BFloat16 error
-            all_predictions.extend([ts_pred.float().cpu() for ts_pred in batch_prediction])
+            # Unsqueeze to output shape (1, Q, H) to satisfy evaluate.py assumptions
+            all_predictions.extend([ts_pred.float().cpu().unsqueeze(0) for ts_pred in batch_prediction])
 
         return all_predictions
 
