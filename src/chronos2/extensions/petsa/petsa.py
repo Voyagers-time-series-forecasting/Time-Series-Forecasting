@@ -265,9 +265,14 @@ class ChronosPETSAPipeline(Chronos2Pipeline):
         test_loader = DataLoader(test_dataset, batch_size=None, pin_memory=True, shuffle=False, drop_last=False)
 
         all_predictions: list[torch.Tensor] = []
+        # Get model device from the model
+        device = self.model.device
+        
         for batch in test_loader:
-            batch_context = batch["context"]
+            batch_context = batch["context"].to(device)
             batch_future_covariates = batch["future_covariates"]
+            if batch_future_covariates is not None:
+                batch_future_covariates = batch_future_covariates.to(device)
             
             # Use the Wrapper to run the full PETSA cycle on this batch
             batch_prediction = self.wrapper.adapt_and_forecast(
@@ -276,8 +281,8 @@ class ChronosPETSAPipeline(Chronos2Pipeline):
                 future_covariates=batch_future_covariates,
             )
             
-            # Extend results
-            all_predictions.extend([ts_pred for ts_pred in batch_prediction])
+            # Extend results (move back to CPU to save GPU memory)
+            all_predictions.extend([ts_pred.cpu() for ts_pred in batch_prediction])
 
         return all_predictions
 
