@@ -1041,6 +1041,8 @@ class Chronos2Pipeline(BaseChronosPipeline):
             batch_group_ids = batch["group_ids"]
             batch_target_idx_ranges = batch["target_idx_ranges"]
 
+            # We added vq_loss to the return values, so we catch it here with the *_ 
+            # to make sure the unpacking doesn't get confused.
             encoder_outputs, (locs, scales), *_ = self.model.encode(
                 context=batch_context.to(device=self.model.device, dtype=torch.float32),
                 group_ids=batch_group_ids.to(self.model.device),

@@ -6,6 +6,7 @@
 import copy
 from dataclasses import dataclass
 from typing import cast
+from .extensions.quantizer.quantizer import VectorQuantizer
 
 import torch
 import torch.nn as nn
@@ -234,6 +235,13 @@ class Chronos2Model(PreTrainedModel):
             act_fn_name=config.dense_act_fn,
             dropout_p=config.dropout_rate,
         )
+        # --- Q-CHRONOS EXTENSION ---
+        if getattr(self.chronos_config, "use_vq", False):
+            self.quantizer = VectorQuantizer(
+                num_embeddings=self.chronos_config.vq_codebook_size,
+                embedding_dim=config.d_model,
+                commitment_cost=self.chronos_config.vq_commitment_cost
+            )
 
         # patching layer
         self.patch = Patch(
@@ -578,6 +586,11 @@ class Chronos2Model(PreTrainedModel):
 
         # get input embeddings of shape (batch, num_context_patches, d_model)
         input_embeds: torch.Tensor = self.input_patch_embedding(patched_context)
+        vq_loss = torch.tensor(0.0, device=self.device)
+        if getattr(self.chronos_config, "use_vq", False):
+            # Quantize the context patches
+            input_embeds, context_vq_loss, _ = self.quantizer(input_embeds)
+            vq_loss = vq_loss + context_vq_loss
         # append [REG] special token embedding, if needed
         if self.chronos_config.use_reg_token:
             reg_input_ids = torch.full((batch_size, 1), self.config.reg_token_id, device=input_embeds.device)
@@ -598,7 +611,11 @@ class Chronos2Model(PreTrainedModel):
 
         # get future embeddings of shape (batch, num_output_patches, d_model)
         future_embeds: torch.Tensor = self.input_patch_embedding(patched_future)
-
+        if getattr(self.chronos_config, "use_vq", False):
+            # Quantize the future/covariate patches as well
+            future_embeds, future_vq_loss, _ = self.quantizer(future_embeds)
+            vq_loss = vq_loss + future_vq_loss
+        
         # concatenate context and future embeddings and masks
         input_embeds = torch.cat([input_embeds, future_embeds], dim=-2)
         attention_mask = torch.cat([attention_mask, future_attention_mask], dim=-1)
@@ -613,7 +630,8 @@ class Chronos2Model(PreTrainedModel):
             group_ids=group_ids,
             output_attentions=output_attentions,
         )
-        return encoder_outputs, loc_scale, patched_future_covariates_mask, num_context_patches
+        # Return vq_loss as the 5th item
+        return encoder_outputs, loc_scale, patched_future_covariates_mask, num_context_patches, vq_loss
 
     def forward(
         self,
@@ -694,7 +712,7 @@ class Chronos2Model(PreTrainedModel):
         - enc_group_self_attn_weights: Group self attention weights, if output_attentions=True
         """
         batch_size = context.shape[0]
-        encoder_outputs, loc_scale, patched_future_covariates_mask, num_context_patches = self.encode(
+        encoder_outputs, loc_scale, patched_future_covariates_mask, num_context_patches, vq_loss = self.encode(
             context=context,
             context_mask=context_mask,
             group_ids=group_ids,
@@ -719,8 +737,9 @@ class Chronos2Model(PreTrainedModel):
             p=self.chronos_config.output_patch_size,
         )
 
-        loss = (
-            self._compute_loss(
+        loss = None
+        if future_target is not None:
+            forecast_loss = self._compute_loss(
                 quantile_preds=quantile_preds,
                 future_target=future_target,
                 future_target_mask=future_target_mask,
@@ -728,9 +747,8 @@ class Chronos2Model(PreTrainedModel):
                 loc_scale=loc_scale,
                 num_output_patches=num_output_patches,
             )
-            if future_target is not None
-            else None
-        )
+            # Add VQ loss to total training loss
+            loss = forecast_loss + vq_loss
 
         # Unscale predictions
         quantile_preds = rearrange(

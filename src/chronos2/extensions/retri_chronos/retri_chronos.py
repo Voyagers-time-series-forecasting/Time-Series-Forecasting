@@ -77,7 +77,7 @@ class TimeSeriesKnowledgeBase:
 
         # Forward pass through encoder
         # model.encode returns (encoder_outputs, loc_scale, patched_future_covariates_mask, num_context_patches)
-        encoder_outputs, _, _, _ = self.model.encode(context=context)
+        encoder_outputs, _, _, _, _ = self.model.encode(context=context)
         
         # last_hidden_state: (batch_size, num_patches + special_tokens, d_model)
         last_hidden_state = encoder_outputs.last_hidden_state

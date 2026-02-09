@@ -110,6 +110,10 @@ class Chronos2ForecastingConfig:
     use_arcsinh: bool = False
     max_output_patches: int = 1
     time_encoding_scale: int | None = None
+    # --- Q-CHRONOS EXTENSION SETTINGS ---
+    use_vq: bool = False                 # Set to True to enable Q-Chronos
+    vq_codebook_size: int = 512          # How many 'shapes' in the dictionary
+    vq_commitment_cost: float = 0.25     # Helps stabilize the codebook training
 
     @classmethod
     def editable_fields(cls) -> list[str]:
