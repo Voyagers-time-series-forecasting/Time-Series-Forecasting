@@ -724,7 +724,14 @@ class Chronos2Model(PreTrainedModel):
             output_attentions=output_attentions,
         )
         hidden_states: torch.Tensor = encoder_outputs[0]
-        assert hidden_states.shape == (batch_size, num_context_patches + 1 + num_output_patches, self.model_dim)
+        
+        # Determine if we should expect the [REG] token in the sequence length
+        reg_token_count = 1 if self.chronos_config.use_reg_token else 0
+        
+        # Updated assertion that dynamically checks for the [REG] token
+        assert hidden_states.shape == (batch_size, num_context_patches + reg_token_count + num_output_patches, self.model_dim)
+        
+        # assert hidden_states.shape == (batch_size, num_context_patches + 1 + num_output_patches, self.model_dim)
 
         # slice the last num_output_patches hidden states to be input into the output_patch_embedding
         forecast_embeds = hidden_states[:, -num_output_patches:]
